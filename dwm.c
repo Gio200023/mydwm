@@ -62,7 +62,7 @@ enum { CurNormal, CurResize, CurMove, CurLast }; /* cursor */
 enum { SchemeNorm, SchemeSel, SchemeStatus, SchemeTagsSel, SchemeTagsNorm, SchemeInfoSel, SchemeInfoNorm }; /* color schemes */
 enum { NetSupported, NetWMName, NetWMState, NetWMCheck,
        NetWMFullscreen, NetActiveWindow, NetWMWindowType,
-       NetWMWindowTypeDialog, NetClientList, NetLast }; /* EWMH atoms */
+       NetWMWindowTypeDialog, NetClientList, NetLast, NetWMWindowsOpacity }; /* EWMH atoms */
 enum { WMProtocols, WMDelete, WMState, WMTakeFocus, WMLast }; /* default atoms */
 enum { ClkTagBar, ClkLtSymbol, ClkStatusText, ClkWinTitle,
        ClkClientWin, ClkRootWin, ClkLast }; /* clicks */
@@ -92,6 +92,7 @@ struct Client {
 	int basew, baseh, incw, inch, maxw, maxh, minw, minh;
 	int bw, oldbw;
 	unsigned int tags;
+	unsigned int switchtotag;
 	int isfixed, isfloating, isurgent, neverfocus, oldstate, isfullscreen;
 	Client *next;
 	Client *snext;
@@ -130,6 +131,7 @@ struct Monitor {
 	Monitor *next;
 	Window barwin;
 	const Layout *lt[2];
+	unsigned int alttag;
 };
 
 typedef struct {
@@ -137,6 +139,7 @@ typedef struct {
 	const char *instance;
 	const char *title;
 	unsigned int tags;
+	unsigned int switchtotag;
 	int isfloating;
 	int monitor;
 } Rule;
@@ -170,6 +173,7 @@ static void drawbar(Monitor *m);
 static void drawbars(void);
 static void enternotify(XEvent *e);
 static void expose(XEvent *e);
+static void opacity(Client *c, double opacity);
 static void focus(Client *c);
 static void focusin(XEvent *e);
 static void focusmon(const Arg *arg);
@@ -182,6 +186,7 @@ static void grabbuttons(Client *c, int focused);
 static void grabkeys(void);
 static void incnmaster(const Arg *arg);
 static void keypress(XEvent *e);
+static void keyrelease(XEvent *e);
 static void killclient(const Arg *arg);
 static void manage(Window w, XWindowAttributes *wa);
 static void mappingnotify(XEvent *e);
@@ -215,6 +220,7 @@ static void spawn(const Arg *arg);
 static void tag(const Arg *arg);
 static void tagmon(const Arg *arg);
 static void tile(Monitor *);
+static void togglealttag();
 static void togglebar(const Arg *arg);
 static void togglefloating(const Arg *arg);
 static void toggletag(const Arg *arg);
@@ -261,6 +267,7 @@ static void (*handler[LASTEvent]) (XEvent *) = {
 	[Expose] = expose,
 	[FocusIn] = focusin,
 	[KeyPress] = keypress,
+        [KeyRelease] = keyrelease,
 	[MappingNotify] = mappingnotify,
 	[MapRequest] = maprequest,
 	[MotionNotify] = motionnotify,
@@ -310,6 +317,11 @@ applyrules(Client *c)
 			for (m = mons; m && m->num != r->monitor; m = m->next);
 			if (m)
 				c->mon = m;
+			if (r->switchtotag) {
+				Arg a = { .ui = r->tags };
+				c->switchtotag = selmon->tagset[selmon->seltags];
+				view(&a);
+			}
 		}
 	}
 	if (ch.res_class)
@@ -728,7 +740,7 @@ dirtomon(int dir)
 void
 drawbar(Monitor *m)
 {
-	int x, w, tw = 0;
+	int x, w, wdelta, tw = 0;
 	int boxs = drw->fonts->h / 9;
 	int boxw = drw->fonts->h / 6 + 2;
 	unsigned int i, occ = 0, urg = 0;
@@ -746,6 +758,7 @@ drawbar(Monitor *m)
 		drw_setscheme(drw, scheme[SchemeStatus]);
 		tw = TEXTW(stext) - lrpad + 2; /* 2px right padding */
 		drw_text(drw, m->ww - tw - 2 * sp, 0, tw, bh, 0, stext, 0);
+               // tw = m->ww -drawstatusbar(m,bh,stext); /* 2px right padding */                      
 	}
 
 	for (c = m->clients; c; c = c->next) {
@@ -756,8 +769,9 @@ drawbar(Monitor *m)
 	x = 0;
 	for (i = 0; i < LENGTH(tags); i++) {
 		w = TEXTW(tags[i]);
+                wdelta = selmon->alttag ? abs(TEXTW(tags[i]) - TEXTW(tagsalt[i])) / 2 : 0;
 		drw_setscheme(drw, scheme[m->tagset[m->seltags] & 1 << i ? SchemeTagsSel : SchemeTagsNorm]);
-		drw_text(drw, x, 0, bh, bh, 0, "", urg & 1 << i);
+		drw_text(drw, x, 0, bh, bh, wdelta + lrpad / 2, (selmon->alttag ? tagsalt[i] : tags[i]), urg & 1 << i);
 		if (occ & 1 << i)
                         //con questa cambia il rettangolino che appare in alto se c'è un qualcosa di aperto
 			drw_rect(drw, x+boxs,boxs, boxw, boxw,
@@ -827,6 +841,19 @@ expose(XEvent *e)
 	if (ev->count == 0 && (m = wintomon(ev->window)))
 		drawbar(m);
 }
+
+void
+opacity(Client *c, double opacity)
+{
+	if(opacity >= 0 && opacity <= 1) {
+		unsigned long real_opacity[] = { opacity * 0xffffffff };
+		XChangeProperty(dpy, c->win, netatom[NetWMWindowsOpacity], XA_CARDINAL,
+				32, PropModeReplace, (unsigned char *)real_opacity,
+				1);
+	} else
+		XDeleteProperty(dpy, c->win, netatom[NetWMWindowsOpacity]);
+}
+
 
 void
 focus(Client *c)
@@ -1063,6 +1090,26 @@ killclient(const Arg *arg)
 }
 
 void
+keyrelease(XEvent *e)
+{
+	unsigned int i;
+	KeySym keysym;
+	XKeyEvent *ev;
+
+	ev = &e->xkey;
+	keysym = XKeycodeToKeysym(dpy, (KeyCode)ev->keycode, 0);
+
+    for (i = 0; i < LENGTH(keys); i++)
+        if (momentaryalttags
+        && keys[i].func && keys[i].func == togglealttag
+        && selmon->alttag
+        && (keysym == keys[i].keysym
+        || CLEANMASK(keys[i].mod) == CLEANMASK(ev->state)))
+            keys[i].func(&(keys[i].arg));
+}
+
+
+void
 manage(Window w, XWindowAttributes *wa)
 {
 	Client *c, *t = NULL;
@@ -1079,6 +1126,7 @@ manage(Window w, XWindowAttributes *wa)
 	c->oldbw = wa->border_width;
 
 	updatetitle(c);
+        opacity(c,defaultopacity);
 	if (XGetTransientForHint(dpy, w, &trans) && (t = wintoclient(trans))) {
 		c->mon = t->mon;
 		c->tags = t->tags;
@@ -1611,6 +1659,7 @@ setup(void)
 	netatom[NetWMWindowType] = XInternAtom(dpy, "_NET_WM_WINDOW_TYPE", False);
 	netatom[NetWMWindowTypeDialog] = XInternAtom(dpy, "_NET_WM_WINDOW_TYPE_DIALOG", False);
 	netatom[NetClientList] = XInternAtom(dpy, "_NET_CLIENT_LIST", False);
+        netatom[NetWMWindowsOpacity] = XInternAtom(dpy, "_NET_WM_WINDOW_OPACITY", False);
 	/* init cursors */
 	cursor[CurNormal] = drw_cur_create(drw, XC_left_ptr);
 	cursor[CurResize] = drw_cur_create(drw, XC_sizing);
@@ -1688,8 +1737,6 @@ sigchld(int unused)
 void
 spawn(const Arg *arg)
 {
-	if (arg->v == dmenucmd)
-		dmenumon[0] = '0' + selmon->num;
 	if (fork() == 0) {
 		if (dpy)
 			close(ConnectionNumber(dpy));
@@ -1753,6 +1800,13 @@ tile(Monitor *m)
 			if (ty + HEIGHT(c) < m->wh)
 				ty += HEIGHT(c) + gappx;
 		}
+}
+
+void
+togglealttag()
+{
+	selmon->alttag = !selmon->alttag;
+	drawbar(selmon);
 }
 
 void
@@ -1843,6 +1897,10 @@ unmanage(Client *c, int destroyed)
 	focus(NULL);
 	updateclientlist();
 	arrange(m);
+	if (c->switchtotag) {
+		Arg a = { .ui = c->switchtotag };
+		view(&a);
+	}
 }
 
 void

@@ -1,30 +1,20 @@
---- dwm.c
-+++ dwm.c
-@@ -59,7 +59,7 @@
+--- dwm.c	Mon Feb 24 21:48:42 2020
++++ dwm.c	Mon Feb 24 21:41:55 2020
+@@ -241,7 +240,6 @@
+ static int xerrordummy(Display *dpy, XErrorEvent *ee);
+ static int xerrorstart(Display *dpy, XErrorEvent *ee);
+ static void xinitvisual();
+-static void drawroundedcorners(Client *c);
  
- /* enums */
- enum { CurNormal, CurResize, CurMove, CurLast }; /* cursor */
--enum { SchemeNorm, SchemeSel }; /* color schemes */
-+enum { SchemeNorm, SchemeSel, SchemeWarn, SchemeUrgent }; /* color schemes */
- enum { NetSupported, NetWMName, NetWMState, NetWMCheck,
-        NetWMFullscreen, NetActiveWindow, NetWMWindowType,
-        NetWMWindowTypeDialog, NetClientList, NetLast }; /* EWMH atoms */
-@@ -714,7 +718,17 @@ drawbar(Monitor *m)
- 	if (m == selmon) { /* status is only drawn on selected monitor */
- 		drw_setscheme(drw, scheme[SchemeNorm]);
- 		tw = TEXTW(stext) - lrpad + 2; /* 2px right padding */
--		drw_text(drw, m->ww - tw, 0, tw, bh, 0, stext, 0);
-+		while (1) {
-+			if ((unsigned int)*ts > LENGTH(colors)) { ts++; continue ; }
-+			ctmp = *ts;
-+			*ts = '\0';
-+			drw_text(drw, m->ww - tw + tx, 0, tw - tx, bh, 0, tp, 0);
-+			tx += TEXTW(tp) -lrpad;
-+			if (ctmp == '\0') { break; }
-+			drw_setscheme(drw, scheme[(unsigned int)(ctmp-1)]);
-+			*ts = ctmp;
-+			tp = ++ts;
-+		}
- 	}
+ /* variables */
+ static const char broken[] = "broken";
+@@ -1394,9 +1340,6 @@
  
- 	for (c = m->clients; c; c = c->next) {
+ 			if (!selmon->lt[selmon->sellt]->arrange || c->isfloating)
+ 				resize(c, nx, ny, nw, nh, 1);
+-
+-            drawroundedcorners(c);
+-
+ 			break;
+ 		}
+ 	} while (ev.type != ButtonRelease);

@@ -1,23 +1,19 @@
 --- config.def.h
 +++ config.def.h
-@@ -12,10 +12,17 @@ static const char col_gray2[]       = "#444444";
- static const char col_gray3[]       = "#bbbbbb";
- static const char col_gray4[]       = "#eeeeee";
- static const char col_cyan[]        = "#005577";
-+static const char col_black[]       = "#000000";
-+static const char col_red[]         = "#ff0000";
-+static const char col_yellow[]      = "#ffff00";
-+static const char col_white[]       = "#ffffff";
-+
- static const char *colors[][3]      = {
--	/*               fg         bg         border   */
--	[SchemeNorm] = { col_gray3, col_gray1, col_gray2 },
--	[SchemeSel]  = { col_gray4, col_cyan,  col_cyan  },
-+	/*					fg         bg          border   */
-+	[SchemeNorm] =	 { col_gray3, col_gray1,  col_gray2 },
-+	[SchemeSel]  =	 { col_gray4, col_cyan,   col_cyan },
-+	[SchemeWarn] =	 { col_black, col_yellow, col_red },
-+	[SchemeUrgent]=	 { col_white, col_red,    col_red },
- };
+@@ -20,6 +20,8 @@ static const char *colors[][3]      = {
  
  /* tagging */
+ static const char *tags[] = { "1", "2", "3", "4", "5", "6", "7", "8", "9" };
++static const char *tagsalt[] = { "1", "2", "3", "4", "5", "6", "7", "8", "9" };
++static const int momentaryalttags = 0; /* 1 means alttags will show only when key is held down*/
+ 
+ static const Rule rules[] = {
+ 	/* xprop(1):
+@@ -84,6 +86,7 @@ static Key keys[] = {
+ 	{ MODKEY,                       XK_period, focusmon,       {.i = +1 } },
+ 	{ MODKEY|ShiftMask,             XK_comma,  tagmon,         {.i = -1 } },
+ 	{ MODKEY|ShiftMask,             XK_period, tagmon,         {.i = +1 } },
++	{ MODKEY,                       XK_n,      togglealttag,   {0} },
+ 	TAGKEYS(                        XK_1,                      0)
+ 	TAGKEYS(                        XK_2,                      1)
+ 	TAGKEYS(                        XK_3,                      2)
